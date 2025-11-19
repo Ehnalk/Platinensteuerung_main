@@ -65,18 +65,19 @@ bool deviceConnected = false;
 
 const float JOYSTICK_DEADZONE = 1.0;
 
-
+/*
 // BLE Callback Klasse
 class MyCallbacks: public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
-    std::string rxValue = pCharacteristic->getValue();
+    uint8_t* rxValue = pCharacteristic->getData();
+    size_t rxLength = pCharacteristic->getValue().length();
 
-    if (rxValue.length() > 0) {
-      parseDabbleData((uint8_t*)rxValue.c_str(), rxValue.length());
+    if (rxLength > 0) {
+      parseDabbleData(rxValue, rxLength);
     }
   }
 };
-
+*/
 
 
 // Beginnt die Bluetooth verbindung mit dem PS4 Controller bzw die Bluetooth suche.
@@ -118,17 +119,17 @@ void onIncommingPS4Data() {
   // Mit dem rechts Pfeil kann man nach rechts Blinken
   if(PS4.Right()) {
     Serial.print("Rechts, ");
-    rightIndicator->startIndicating();
+    rightIndicator.startIndicating();
     delay(100);
-    rightIndicator->stopIndicating();
+    rightIndicator.stopIndicating();
   }
 
   //mit dem links Pfeil kann man nach links Blinken
   if(PS4.Left())  {
     Serial.print("Links, ");
-    leftIndicator->startIndicating();
+    leftIndicator.startIndicating();
     delay(100);
-    leftIndicator->stopIndicating();
+    leftIndicator.stopIndicating();
   }
 
   // Der Input des Rechten Joystick ist -127 zu 127.
@@ -144,7 +145,7 @@ void onIncommingPS4Data() {
   }
 
   // Wenn der eingehende R2/L2 reduntant ist, wird das programm hier beendet.
-  if(combinedR2L2Buttons == motor->getCurrentDuty()){
+  if(combinedR2L2Buttons == motor.getCurrentDuty()){
     return;
   }
   
@@ -152,7 +153,7 @@ void onIncommingPS4Data() {
   Serial.print(PS4.R2Value());
   Serial.print(" L2: ");
   Serial.println(PS4.L2Value());
-  motor->changeSpeedAbsolute(
+  motor.changeSpeedAbsolute(
                           (int)round(float((float(PS4.R2Value() - PS4.L2Value()) / 127)) * 100));
 
 
@@ -170,6 +171,29 @@ void onDisconnect() {
   lightAnimation(1);
 } 
 
+void lightAnimation(int blink_amount)   //Animation, die abgespielt werden kann. Schaltet die LEDs zweimal an und aus und kehrt dann auf rest zurück
+{
+  for (int j = 0; j < blink_amount; j++) {
+
+    for(LEDManager* i : allLeds)
+    {
+      i->turnOn(100);
+    }
+    delay(500);
+    for(LEDManager* i : allLeds)
+    {
+      i->turnOff();
+    }
+      delay(500);
+
+  }
+
+  delay(500);
+  for(LEDManager* i : allLeds)
+  {
+    i->rest();
+  }
+}
 //  --------------------------------------------------------------
 //  Funktionen für Dabble BLE verbindung
 //  --------------------------------------------------------------
@@ -207,7 +231,7 @@ void parseGamepadData(uint8_t* data, uint8_t length) {
     gamepad.buttons = data[5];
     
     // Konvertiere zu Motor-Werten
-    motor->changeSpeedAbsolute(convertToMotorSpeed(gamepad.yAxis));
+    motor.changeSpeedAbsolute(convertToMotorSpeed(gamepad.yAxis));
     steering.steerAbsolute(convertToSteering(gamepad.xAxis));
     
   }
@@ -274,10 +298,10 @@ void config()   //Config-Klasse, hier können alle Werte angepasst werden.
   PS4.attach(onIncommingPS4Data);
 
   // Callback-Loop des PS4 Controllers starten
-    xTaskCreatePinnedToCore(beginPS4Connection, "PS4ControllerTask", 4096, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(beginBLEConnection, "BLETask", 4096, NULL, 1, NULL, 1);
+//    xTaskCreatePinnedToCore(beginPS4Connection, "PS4ControllerTask", 4096, NULL, 1, NULL, 0);
+//    xTaskCreatePinnedToCore(beginBLEConnection, "BLETask", 4096, NULL, 1, NULL, 1);
 //  beginBLEConnection(NULL);
-//  beginPS4Connection(NULL);
+  beginPS4Connection(NULL);
 //  initBLE();
 
 }
