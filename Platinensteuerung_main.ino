@@ -35,18 +35,16 @@
 #define PI 3.14159
 
 
-
 //Klassen für die Motorsteuerung global initialisieren
-Motor* motor = nullptr;
-SteeringServo* steering = nullptr;
-LEDManager* leftIndicator = nullptr;
-LEDManager* rightIndicator = nullptr;
-LEDManager* frontLights = nullptr;
-LEDManager* rearLights = nullptr;
-LEDManager* brakeLights = nullptr;
-
+Motor motor(13, 12, 14, 27, 100, 30, 1, 25000);  // direction_change_delay = 1 (NICHT 500!)
+SteeringServo steering(23, -3, 90, 20, 6);
+LEDManager leftIndicator({16}, 0, 100, 1000);
+LEDManager rightIndicator({5}, 0, 100, 1000);
+LEDManager frontLights({19}, 1, 100, 1000);
+LEDManager rearLights({18}, 1, 100, 1000);
 
 std::vector<LEDManager*> allLeds;
+
 
 // Klasse für Die Dabble App global initialisieren
 BLESecurity *pSecurity = new BLESecurity();
@@ -294,55 +292,9 @@ void motorSteuerungSetup(){
   pinMode(20, OUTPUT); // Bremslicht
   pinMode(23, OUTPUT); // Servo
   
-  // Motor initialisieren
-  int motor_pin_front = 13;
-  int motor_pin_back = 12;
-  int motor_pin_dauerhigh_front = 14;
-  int motor_pin_dauerhigh_back = 27;
-  int motor_max_duty = 100;
-  int motor_min_duty = 30;
-  int motor_safety_delay = 1 * 1; 
-  int motor_freq = 100000;
-  motor = new Motor(motor_pin_front, motor_pin_back, motor_pin_dauerhigh_front, motor_pin_dauerhigh_back,
-                     motor_max_duty, motor_min_duty, motor_safety_delay, motor_freq);
-
-  setZero();
-
-  //Servo initialisieren
-  int servo_pin = 23;
-  int power_pin = -1;
-  int servo_rest_position = 90;
-  int servo_max_steering_degree = 20; 
-  int servo_deadzone = 6;
-  steering = SteeringServo(servo_pin, power_pin, servo_rest_position, servo_max_steering_degree, servo_deadzone);
-
-  //LEDs initialisieren
-  int indicator_brightness = 100;
-  int light_brightness = 100;
-
-  int indicator_freq = 1000;
-  int light_freq = 1000;
-
-  int indicator_rest_state = 0;
-  int light_rest_state = 1;
-
-  std::vector<int> left_indicators = {16};
-  std::vector<int> right_indicators = {5};
-  std::vector<int> front_lights = {19};
-  std::vector<int> rear_lights = {18};
-  std::vector<int> brake_lights = {20}
-   
-  leftIndicator = new LEDManager(left_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
-  rightIndicator = new LEDManager(right_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
-  frontLights = new LEDManager(front_lights, light_rest_state, light_brightness, light_freq);
-  rearLights = new LEDManager(rear_lights, light_rest_state, light_brightness, light_freq);
-  brakeLights = new LEDManager(bremslicht, light_rest_state, light_brightness, light_freq);
+  delay(50);
 }
 
-
-void loop() {
-  // put your main code here, to run repeatedly:
-}
 
 void setZero()
 {
