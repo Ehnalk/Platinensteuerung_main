@@ -25,8 +25,9 @@
 
 
 // UUID's für die Dabble app, es gibt eine library, diese wird jedoch nichtmehr gepflegt
-#define SERVICE_UUID         "06b298f7-60df-4f9c-9cee-4d7c72dd1863"
-#define CHARACTERISTIC_UUID  "d136d35f-a5d8-4ac6-986a-3f7aa9025484"
+#define SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
 #define DABBLE_MODULE_ID_GAMEPAD  0x01
 #define GAMEPAD_DATA_LENGTH       0x06
@@ -42,6 +43,7 @@ LEDManager* leftIndicator = nullptr;
 LEDManager* rightIndicator = nullptr;
 LEDManager* frontLights = nullptr;
 LEDManager* rearLights = nullptr;
+LEDManager* brakeLights = nullptr;
 
 
 std::vector<LEDManager*> allLeds;
@@ -51,59 +53,214 @@ BLESecurity *pSecurity = new BLESecurity();
 BLEServer* pServer = NULL;
 BLECharacteristic* pTxCharacteristic = NULL;
 
+// Gamepad Datenstruktur
+struct GamepadData {
+  float xAxis;        // -7 bis +7
+  float yAxis;        // -7 bis +7
+  int radius;         // 0 bis 7
+  int angle;          // 0 bis 360
+  uint8_t buttons;    // Button-Status als Bitmaske
+};
+
+GamepadData gamepad = {0, 0, 0, 0, 0};
+bool deviceConnected = false;
+
+const float JOYSTICK_DEADZONE = 1.0;
 
 
-void motorSteuerungSetup(){
+// BLE Callback Klasse
+class MyCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string rxValue = pCharacteristic->getValue();
 
-  pinMode(16, OUTPUT); // Blinker links
-  pinMode(19, OUTPUT); // Frontlicht
-  pinMode(5, OUTPUT);  // Blinker rechts
-  pinMode(18, OUTPUT); // Rücklicht
-  pinMode(23, OUTPUT); // Servo
-  
-  // Motor initialisieren
-  int motor_pin_front = 13;
-  int motor_pin_back = 12;
-  int motor_pin_dauerhigh_front = 14;
-  int motor_pin_dauerhigh_back = 27;
-  int motor_max_duty = 100;
-  int motor_min_duty = 30;
-  int motor_safety_delay = 1 * 1; 
-  int motor_freq = 25;
-  motor = new Motor(motor_pin_front, motor_pin_back, motor_pin_dauerhigh_front, motor_pin_dauerhigh_back,
-                     motor_max_duty, motor_min_duty, motor_safety_delay, motor_freq);
+    if (rxValue.length() > 0) {
+      parseDabbleData((uint8_t*)rxValue.c_str(), rxValue.length());
+    }
+  }
+};
 
-  setZero();
 
-  //Servo initialisieren
-  int servo_pin = 23;
-  int power_pin = -1;
-  int servo_rest_position = 90;
-  int servo_max_steering_degree = 20; 
-  int servo_deadzone = 6;
-  steering = new SteeringServo(servo_pin, power_pin, servo_rest_position, servo_max_steering_degree, servo_deadzone);
 
-  //LEDs initialisieren
-  int indicator_brightness = 100;
-  int light_brightness = 100;
+// Beginnt die Bluetooth verbindung mit dem PS4 Controller bzw die Bluetooth suche.
+// Die Paramater '*pvParamaeters* ist für eine Spätere verwendung von Multithreading.
+void beginPS4Connection(void *pvParameters) {
+  PS4.begin("60:5b:b4:b2:90:b6");
 
-  int indicator_freq = 1000;
-  int light_freq = 1000;
+  Serial.println("Waiting for Controller");
+  Serial.println("PS4 Controller searching in Thread: ");
+  Serial.println(xPortGetCoreID());
 
-  int indicator_rest_state = 0;
-  int light_rest_state = 1;
-
-  std::vector<int> left_indicators = {16};
-  std::vector<int> right_indicators = {5};
-  std::vector<int> front_lights = {19};
-  std::vector<int> rear_lights = {18};
-   
-  leftIndicator = new LEDManager(left_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
-  rightIndicator = new LEDManager(right_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
-  frontLights = new LEDManager(front_lights, light_rest_state, light_brightness, light_freq);
-  rearLights = new LEDManager(rear_lights, light_rest_state, light_brightness, light_freq);
 }
 
+// Variable um nur jeden dritten R2/L2 Wert zu verwerten, optimierungsversuch
+uint8_t ignoreDataCounter = 0;
+
+// Funktion die Bei eingehenden PS4 Daten aufgerufen wird, diese funktion ist auch für die verarbeitung 
+// /verwertung der Daten zuständig.
+void onIncommingPS4Data() { 
+
+  int8_t combinedR2L2Buttons = PS4.R2Value() + PS4.L2Value();
+
+  if(ignoreDataCounter == 3){
+    ignoreDataCounter = 0;
+    return;
+  }
+  if(ignoreDataCounter != 0){
+    ignoreDataCounter++;
+    return;
+  }
+  ignoreDataCounter++;
+
+  //  Auf Dreieck soll man kann man alle Lichter an machen können.
+  if(PS4.Triangle())  {
+    Serial.print("Triangle, ");
+    lightAnimation(1);
+  }
+
+  // Mit dem rechts Pfeil kann man nach rechts Blinken
+  if(PS4.Right()) {
+    Serial.print("Rechts, ");
+    rightIndicator->startIndicating();
+    delay(100);
+    rightIndicator->stopIndicating();
+  }
+
+  //mit dem links Pfeil kann man nach links Blinken
+  if(PS4.Left())  {
+    Serial.print("Links, ");
+    leftIndicator->startIndicating();
+    delay(100);
+    leftIndicator->stopIndicating();
+  }
+
+  // Der Input des Rechten Joystick ist -127 zu 127.
+  if(PS4.RStickX() != steering.getCurrentSteeringDegree()) {  
+
+    // Convertieren zu %
+    int8_t r_Joystick_x_Value = (int)round(float(float(PS4.RStickX()) / 127) * 100);
+    Serial.print("Lenken: ");
+    Serial.println(r_Joystick_x_Value);
+
+    // Der Servo Klasse wird ein Wert von -100% bis 100% gegeben.
+    steering.steerAbsolute(r_Joystick_x_Value);
+  }
+
+  // Wenn der eingehende R2/L2 reduntant ist, wird das programm hier beendet.
+  if(combinedR2L2Buttons == motor->getCurrentDuty()){
+    return;
+  }
+  
+  Serial.print(" R2: ");
+  Serial.print(PS4.R2Value());
+  Serial.print(" L2: ");
+  Serial.println(PS4.L2Value());
+  motor->changeSpeedAbsolute(
+                          (int)round(float((float(PS4.R2Value() - PS4.L2Value()) / 127)) * 100));
+
+
+}
+
+
+void onConnect()  {
+  Serial.println("Controller Connected!");
+  lightAnimation(2);
+}
+
+
+void onDisconnect() {
+  Serial.println("Controller Disconnected!");
+  lightAnimation(1);
+} 
+
+//  --------------------------------------------------------------
+//  Funktionen für Dabble BLE verbindung
+//  --------------------------------------------------------------
+
+void parseDabbleData(uint8_t* data, size_t length) {
+  
+  // Minimale Länge prüfen
+  if (length < 4) return;
+  
+  
+  if (data[0] == 0xFF && data[1] == DABBLE_MODULE_ID_GAMEPAD) {
+    
+    uint8_t dataLen = data[2];
+    
+    if (length >= 3 + dataLen) {
+      parseGamepadData(&data[3], dataLen);
+    }
+  }
+}
+
+void parseGamepadData(uint8_t* data, uint8_t length) {
+  
+
+  if (length >= 6) {
+    
+    // X und Y Achse als signed bytes
+    gamepad.xAxis = (int8_t)data[0];
+    gamepad.yAxis = (int8_t)data[1];
+    gamepad.radius = data[2];
+    
+    // Winkel als 16-bit Wert
+    gamepad.angle = (data[3] << 8) | data[4];
+    
+    // Button Status
+    gamepad.buttons = data[5];
+    
+    // Konvertiere zu Motor-Werten
+    motor->changeSpeedAbsolute(convertToMotorSpeed(gamepad.yAxis));
+    steering.steerAbsolute(convertToSteering(gamepad.xAxis));
+    
+  }
+}
+
+int convertToMotorSpeed(float yValue) {
+  
+  // Deadzone anwenden
+  if (abs(yValue) < JOYSTICK_DEADZONE) {
+    return 0;  // Neutral Position (Stopp)
+  }
+  
+  // Normalisiere Y-Wert auf -1.0 bis +1.0
+  float normalized = yValue / 7.0;
+  
+  // Begrenze auf -1.0 bis +1.0
+  normalized = constrain(normalized, -1.0, 1.0);
+  
+  // Konvertiere zu -100 bis +100 Bereich
+  int speed = (int)(normalized * 100.0);
+  
+  return constrain(speed, -100, 100);
+}
+
+int convertToSteering(float xValue) {
+  
+  // Deadzone anwenden
+  if (abs(xValue) < JOYSTICK_DEADZONE) {
+    return 0;  // Neutral Position (Geradeaus)
+  }
+  
+  // Normalisiere X-Wert auf -1.0 bis +1.0
+  float normalized = xValue / 7.0;
+  
+  // Begrenze auf -1.0 bis +1.0
+  normalized = constrain(normalized, -1.0, 1.0);
+  
+  // Konvertiere zu -100 bis +100 Bereich
+  int steering = (int)(normalized * 100.0);
+  
+  return constrain(steering, -100, 100);
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  setZero();
+  config();
+  setZero();
+  steering.begin();
+
+}
 
 void config()   //Config-Klasse, hier können alle Werte angepasst werden.
 {
@@ -127,127 +284,61 @@ void config()   //Config-Klasse, hier können alle Werte angepasst werden.
 
 }
 
+// Setup funktion für die Motorstuerung, aus Übersichtlichkeitsgründen nicht in void config()
+void motorSteuerungSetup(){
 
-void lightAnimation(int blink_amount)   //Animation, die abgespielt werden kann. Schaltet die LEDs zweimal an und aus und kehrt dann auf rest zurück
-{ 
-  for (int j = 0; j < blink_amount; j++) {
+  pinMode(16, OUTPUT); // Blinker links
+  pinMode(19, OUTPUT); // Frontlicht
+  pinMode(5, OUTPUT);  // Blinker rechts
+  pinMode(18, OUTPUT); // Rücklicht
+  pinMode(20, OUTPUT); // Bremslicht
+  pinMode(23, OUTPUT); // Servo
   
-    for(LEDManager* i : allLeds)
-    {
-      i->turnOn(100);
-    }
-    delay(500);
-    for(LEDManager* i : allLeds)
-    {
-      i->turnOff();
-    }
-      delay(500);
+  // Motor initialisieren
+  int motor_pin_front = 13;
+  int motor_pin_back = 12;
+  int motor_pin_dauerhigh_front = 14;
+  int motor_pin_dauerhigh_back = 27;
+  int motor_max_duty = 100;
+  int motor_min_duty = 30;
+  int motor_safety_delay = 1 * 1; 
+  int motor_freq = 100000;
+  motor = new Motor(motor_pin_front, motor_pin_back, motor_pin_dauerhigh_front, motor_pin_dauerhigh_back,
+                     motor_max_duty, motor_min_duty, motor_safety_delay, motor_freq);
 
-  }
-
-  delay(500);
-  for(LEDManager* i : allLeds)
-  {
-    i->rest();
-  }
-}
-
-
-
-void beginPS4Connection(void *pvParameters) {
-  PS4.begin("60:5b:b4:b2:90:b6");
-
-  Serial.println("Waiting for Controller");
-  Serial.println("PS4 Controller searching in Thread: ");
-  Serial.println(xPortGetCoreID());
-  motor->changeSpeedAbsolute(0);
-
-}
-
-
-uint8_t ignoreDataCounter = 0;
-
-void onIncommingPS4Data() { 
-
-  int8_t combinedR2L2Buttons = PS4.R2Value() + PS4.L2Value();
-
-  if(ignoreDataCounter == 3){
-    ignoreDataCounter = 0;
-    return;
-  }
-
-  if(ignoreDataCounter != 0){
-    ignoreDataCounter++;
-    return;
-  }
-
-  ignoreDataCounter++;
-
-  if(PS4.Triangle())  {
-    Serial.print("Triangle, ");
-    lightAnimation(1);
-  }
-
-  if(PS4.Right()) {
-    Serial.print("Rechts, ");
-    rightIndicator->startIndicating();
-    delay(100);
-    rightIndicator->stopIndicating();
-  }
-
-  if(PS4.Left())  {
-    Serial.print("Links, ");
-    leftIndicator->startIndicating();
-    delay(100);
-    leftIndicator->stopIndicating();
-  }
-
-  //  Wenn der Rechte Joystick eine X position größer als 10 hat, bzw mehr als 10/255 oder 4% von seinem Ursprung bewegt 
-  //  wird, wird gelenkt.
-  if(PS4.RStickX() > 10) {  
-    Serial.print(PS4.RStickX());
-
-    // Der Rechte Joystick gibt einen Wert auf der X-Achse von 0 bis 255 aus
-    steering->steerAbsolute(
-                        (int)round(float((float(PS4.RStickX()) / 127.5) - 1 ) * 100)
-                        );
-  }
-
-  if(combinedR2L2Buttons == motor->getCurrentDuty()){
-    return;
-  }
-  
-  Serial.print(" R2: ");
-  Serial.print(PS4.R2Value());
-  Serial.print(" L2: ");
-  Serial.println(PS4.L2Value());
-  motor->changeSpeedAbsolute(
-                          (int)round(float((float(PS4.R2Value() - PS4.L2Value()) / 127)) * 100));
-
-
-}
-
-
-void onConnect()  {
-  Serial.println("Controller Connected!");
-//  lightAnimation(2);
-}
-
-
-void onDisconnect() {
-  Serial.println("Controller Disconnected!");
-//  lightAnimation(1);
-} 
-
-
-void setup() {
-  // put your setup code here, to run once:
-  setZero();
-  config();
-  motor->changeSpeedAbsolute(0);
   setZero();
 
+  //Servo initialisieren
+  int servo_pin = 23;
+  int power_pin = -1;
+  int servo_rest_position = 90;
+  int servo_max_steering_degree = 20; 
+  int servo_deadzone = 6;
+  steering = SteeringServo(servo_pin, power_pin, servo_rest_position, servo_max_steering_degree, servo_deadzone);
+
+  //LEDs initialisieren
+  int indicator_brightness = 100;
+  int light_brightness = 100;
+
+  int indicator_freq = 1000;
+  int light_freq = 1000;
+
+  int indicator_rest_state = 0;
+  int light_rest_state = 1;
+
+  std::vector<int> left_indicators = {16};
+  std::vector<int> right_indicators = {5};
+  std::vector<int> front_lights = {19};
+  std::vector<int> rear_lights = {18};
+  std::vector<int> brake_lights = {20}
+   
+  leftIndicator = new LEDManager(left_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
+  rightIndicator = new LEDManager(right_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
+  frontLights = new LEDManager(front_lights, light_rest_state, light_brightness, light_freq);
+  rearLights = new LEDManager(rear_lights, light_rest_state, light_brightness, light_freq);
+  brakeLights = new LEDManager(bremslicht, light_rest_state, light_brightness, light_freq);
 }
+
 
 void loop() {
   // put your main code here, to run repeatedly:

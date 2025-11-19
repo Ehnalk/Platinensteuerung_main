@@ -27,7 +27,7 @@ LEDManager* leftIndicator = nullptr;
 LEDManager* rightIndicator = nullptr;
 LEDManager* frontLights = nullptr;
 LEDManager* rearLights = nullptr;
-LEDManager* bremslicht = nullptr;
+LEDManager* brakeLighs = nullptr;
 
 
 std::vector<LEDManager*> allLeds;
@@ -79,13 +79,13 @@ void motorSteuerungSetup(){
   std::vector<int> right_indicators = {5};
   std::vector<int> front_lights = {19};
   std::vector<int> rear_lights = {18};
-  std::vector<int> bremslicht = {20}
+  std::vector<int> brake_lights = {20}
    
   leftIndicator = new LEDManager(left_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
   rightIndicator = new LEDManager(right_indicators, indicator_rest_state, indicator_brightness, indicator_freq);
   frontLights = new LEDManager(front_lights, light_rest_state, light_brightness, light_freq);
   rearLights = new LEDManager(rear_lights, light_rest_state, light_brightness, light_freq);
-  bremslicht = new LEDManager(bremslicht, light_rest_state, light_brightness, light_freq);
+  brakeLighs = new LEDManager(brake_lights, light_rest_state, light_brightness, light_freq);
 }
 
 
@@ -132,7 +132,9 @@ void lightAnimation(int blink_amount)
     i->rest();
   }
 }
+void beginBLEConnection(void *pvParameters) {
 
+}
 
 // Beginnt die Bluetooth verbindung mit dem PS4 Controller bzw die Bluetooth suche.
 // Die Paramater '*pvParamaeters* ist für eine Spätere verwendung von Multithreading.
