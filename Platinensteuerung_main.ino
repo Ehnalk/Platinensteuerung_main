@@ -88,6 +88,7 @@ void beginPS4Connection(void *pvParameters) {
   Serial.println("Waiting for Controller");
   Serial.println("PS4 Controller searching in Thread: ");
   Serial.println(xPortGetCoreID());
+  motor.changeSpeedAbsolute(0);
 
 }
 
@@ -98,7 +99,6 @@ uint8_t ignoreDataCounter = 0;
 // /verwertung der Daten zuständig.
 void onIncommingPS4Data() { 
 
-  int8_t combinedR2L2Buttons = PS4.R2Value() + PS4.L2Value();
 
   if(ignoreDataCounter == 3){
     ignoreDataCounter = 0;
@@ -109,6 +109,10 @@ void onIncommingPS4Data() {
     return;
   }
   ignoreDataCounter++;
+
+  int8_t combinedR2L2Buttons = PS4.R2Value() + PS4.L2Value();
+  int8_t R2L2_in_percentage = (int)round(float((float(PS4.R2Value() - PS4.L2Value()) / 127)) * 100);
+  int8_t RX_percentage = (int)round(float((float(PS4.RStickX()) / 127 ) * 100));
 
   //  Auf Dreieck soll man kann man alle Lichter an machen können.
   if(PS4.Triangle())  {
@@ -133,19 +137,23 @@ void onIncommingPS4Data() {
   }
 
   // Der Input des Rechten Joystick ist -127 zu 127.
-  if(PS4.RStickX() != steering.getCurrentSteeringDegree()) {  
+  if(RX_percentage != steering.getCurrentSteeringPercent()) {
 
-    // Convertieren zu %
-    int8_t r_Joystick_x_Value = (int)round(float(float(PS4.RStickX()) / 127) * 100);
-    Serial.print("Lenken: ");
-    Serial.println(r_Joystick_x_Value);
+    if(abs(PS4.RStickX()) > 10 ){
+    
+    
+      Serial.println(PS4.RStickX());
 
-    // Der Servo Klasse wird ein Wert von -100% bis 100% gegeben.
-    steering.steerAbsolute(r_Joystick_x_Value);
+      // Der Rechte Joystick gibt einen Wert auf der X-Achse von 0 bis 255 aus
+      steering.steerAbsolute(RX_percentage);
+    }else {
+      steering.steerAbsolute(0);
+      Serial.println(0);
+    }
   }
 
   // Wenn der eingehende R2/L2 reduntant ist, wird das programm hier beendet.
-  if(combinedR2L2Buttons == motor.getCurrentDuty()){
+  if(R2L2_in_percentage == motor.getCurrentDuty()){
     return;
   }
   
@@ -153,8 +161,7 @@ void onIncommingPS4Data() {
   Serial.print(PS4.R2Value());
   Serial.print(" L2: ");
   Serial.println(PS4.L2Value());
-  motor.changeSpeedAbsolute(
-                          (int)round(float((float(PS4.R2Value() - PS4.L2Value()) / 127)) * 100));
+  motor.changeSpeedAbsolute(R2L2_in_percentage);
 
 
 }
@@ -309,6 +316,8 @@ void config()   //Config-Klasse, hier können alle Werte angepasst werden.
 // Setup funktion für die Motorstuerung, aus Übersichtlichkeitsgründen nicht in void config()
 void motorSteuerungSetup(){
 
+  pinMode(13, OUTPUT); // Motor Vorwärts
+  pinMode(12, OUTPUT); // Motor Rückwärts
   pinMode(16, OUTPUT); // Blinker links
   pinMode(19, OUTPUT); // Frontlicht
   pinMode(5, OUTPUT);  // Blinker rechts
@@ -319,6 +328,7 @@ void motorSteuerungSetup(){
   delay(50);
 }
 
+void loop(){}
 
 void setZero()
 {
